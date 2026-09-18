@@ -312,20 +312,41 @@ def _record_history():
     st.session_state["history"] = hist[:2]   # keep last 2
 
 
+def _refresh_sao_status(tracer):
+    """Pull the latest activation/urls/warnings off `tracer` into session
+    state, so the status area reflects everything traced so far in this
+    session — the main run AND any later follow-on actions that reused the
+    same tracer, not just whichever one ran most recently."""
+    st.session_state["sao_activated"] = tracer.activated
+    st.session_state["sao_urls"] = tracer.console_urls()
+    st.session_state["sao_warnings"] = tracer.sdk_warnings
+
+
 if run and sources:
     for k in ("result", "result_md", "baseline", "drafted_rules", "patches",
              "pushed_rules", "sao_urls", "sao_requested", "sao_activated",
              "sao_warnings"):
         st.session_state.pop(k, None)
 
-    # One tracer, shared by both models below, so a run is one SAO session
-    # with a named trace per role — not two disconnected sessions. Never
-    # built in offline mode: there's no real model call to trace, so
-    # attempting it would just be an unnecessary network round trip.
+    # A brand-new "Run" click always starts a brand-new SAO session — detach
+    # the previous tracer's warning handler first so handlers don't pile up
+    # on the shared "splunk_ao" logger across many runs in one process.
+    old_tracer = st.session_state.pop("sao_tracer", None)
+    if old_tracer is not None:
+        old_tracer.detach()
+
+    # This tracer is stored in session_state (not just a local variable) so
+    # the two later follow-on buttons below (draft rules, generate patches)
+    # can reuse the SAME tracer/session for their own real LLM calls too —
+    # every real agent call in a session gets traced, not just the ones in
+    # the main comparison. Never built in offline mode: there's no real
+    # model call to trace, so attempting it would just be an unnecessary
+    # network round trip.
     tracer = None
     if provider != "mock" and sao_api_key:
         st.session_state["sao_requested"] = True
         tracer = build_sao_tracer(sao_api_key, sao_project, sao_agent_stream)
+        st.session_state["sao_tracer"] = tracer
 
     st.markdown("#### Running the raw LLM baseline")
     model_a, _ = _build_model(tracer)
@@ -337,10 +358,8 @@ if run and sources:
     st.session_state["result_md"] = build_markdown_report(st.session_state["result"])
 
     if tracer is not None:
-        tracer.close()
-        st.session_state["sao_activated"] = tracer.activated
-        st.session_state["sao_urls"] = tracer.console_urls()
-        st.session_state["sao_warnings"] = tracer.sdk_warnings
+        tracer.flush()
+        _refresh_sao_status(tracer)
 
     _record_history()
 
@@ -485,9 +504,13 @@ def _render_flywheel(result):
         st.markdown(f"**Discovery {i+1}: {g['vuln_class']}** in "
                     f"`{g['finding']}` — {g['pattern']}")
     if st.button("Draft CodeGuard rules from these discoveries", key="draft_rules"):
-        model, _ = _build_model()
+        tracer = st.session_state.get("sao_tracer")
+        model, _ = _build_model(tracer)
         st.session_state["drafted_rules"] = [
             draft_rule_from_gap(g, model) for g in result.rule_gaps]
+        if tracer is not None:
+            tracer.flush()
+            _refresh_sao_status(tracer)
 
     for i, dr in enumerate(st.session_state.get("drafted_rules", [])):
         with st.container(border=True):
@@ -514,8 +537,12 @@ def _render_patches(result):
                "closes it. Patches are suggestions — review, apply, and re-scan "
                "to verify.")
     if st.button("Generate suggested patches", key="gen_patches"):
-        model, _ = _build_model()
+        tracer = st.session_state.get("sao_tracer")
+        model, _ = _build_model(tracer)
         st.session_state["patches"] = suggest_patches(result.true_positives, model)
+        if tracer is not None:
+            tracer.flush()
+            _refresh_sao_status(tracer)
 
     for pt in st.session_state.get("patches", []):
         with st.container(border=True):

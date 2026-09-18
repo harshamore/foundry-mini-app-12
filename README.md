@@ -110,12 +110,18 @@ itself. A bad key or the package not being installed degrades to "no
 tracing" with a message in the terminal, never a failed run. Offline demo
 mode never builds a tracer at all — there's no real model call to trace.
 
-One tracer is shared by both models in a run (the raw baseline and the
-harness pipeline), so a single "Run" click is **one SAO session** with **one
-named trace per role's call** (`baseline`, `cartographer`, `detector.rule_sweep`,
-`triager`, ...) inside it — not two disconnected sessions. A link back to the
-run's Agent Stream appears above the comparison table once tracing activates;
-a warning explains why not if a key was entered but it didn't.
+One tracer, one SAO session, for the whole session's real agent activity —
+not just the main "Run" click. It's built once (shared by both the raw
+baseline and harness pipeline Models, giving every role its own named trace:
+`baseline`, `cartographer`, `detector.rule_sweep`, `detector.exploratory`,
+`triager`, `validator`, `reporter`), then kept in `st.session_state` and
+reused by the two later follow-on actions too — "Draft CodeGuard rules"
+(`rule_authoring`) and "Generate suggested patches" (`remediator`) — so every
+real LLM call anywhere in the app gets traced, not only the ones inside the
+main comparison. A fresh "Run" click always starts a fresh SAO session (a new
+tracer, detaching the previous one's warning handler first). A link back to
+the run's Agent Stream appears above the comparison table once tracing
+activates; a warning explains why not if a key was entered but it didn't.
 
 **A populated Agent Stream with no traces inside it is a real failure mode,
 not a fluke** — learned by reading the `splunk-ao` SDK's own source, not

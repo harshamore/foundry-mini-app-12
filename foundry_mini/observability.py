@@ -63,10 +63,14 @@ DEFAULT_CONSOLE_URL = "https://console.multitenant.galileocloud.io"
 
 
 class SAOTracer:
-    """One of these per Streamlit run, shared by both the raw-baseline Model
-    and the harness-pipeline Model, so a single run shows up as one session
-    with every role's call as its own named trace inside it — not two
-    disconnected sessions for the two sides of the comparison."""
+    """One of these lives for as long as one SAO session does — built for the
+    main "Run" click, then reused (via st.session_state) by the two later
+    follow-on buttons (draft rules, generate patches) too, so *every* real
+    LLM call in a session gets a trace, not just the ones inside the main
+    comparison. A brand-new "Run" click replaces it with a fresh tracer
+    (fresh session, fresh warning collector) — detach() tears down the old
+    one's logging handler at that point so handlers don't pile up on the
+    shared "splunk_ao" logger across many runs in one long-lived process."""
 
     def __init__(self, logger: Any, console_url: str):
         self._logger = logger
@@ -121,7 +125,11 @@ class SAOTracer:
         except Exception:
             return None, None
 
-    def close(self) -> None:
+    def flush(self) -> None:
+        """Push whatever's been logged so far. Safe to call repeatedly — once
+        after the main run, again after each later follow-on action — unlike
+        the old close(), this does NOT tear down the warning handler, since
+        this same tracer is reused for those later calls too."""
         try:
             self._logger.flush()   # on_error deliberately omitted -- letting
                                    # a flush failure fall through to its
@@ -131,8 +139,13 @@ class SAOTracer:
                                    # for every SDK-swallowed failure.
         except Exception:
             pass
-        finally:
-            logging.getLogger("splunk_ao").removeHandler(self._warnings)
+
+    def detach(self) -> None:
+        """Remove this tracer's warning handler from the shared 'splunk_ao'
+        logger. Call only when replacing this tracer with a new one (a fresh
+        "Run" click) — not after every flush, since this tracer keeps getting
+        reused by later follow-on actions in the same session."""
+        logging.getLogger("splunk_ao").removeHandler(self._warnings)
 
 
 def build_sao_tracer(api_key: str | None, project: str | None,
