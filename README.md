@@ -113,10 +113,16 @@ named trace per role's call** (`baseline`, `cartographer`, `detector.rule_sweep`
 run's Agent Stream appears above the comparison table once tracing activates;
 a warning explains why not if a key was entered but it didn't.
 
-Not a hard dependency — `splunk-ao` isn't in `requirements.txt`, matching the
-same "own optional extra, not folded into the base install" reasoning used
-for Galileo in the sibling LangChain-based harness this pattern is ported
-from: `pip install splunk-ao` only if you intend to use this.
+`splunk-ao` **is** listed in `requirements.txt`, unlike Galileo's own
+`[observability]` extra in the sibling harness this pattern is ported from —
+deliberately different, not an oversight. That repo can install its
+observability extra live, in-kernel, the moment a key is entered in a
+notebook cell; this app's primary target is Streamlit Community Cloud, a
+headless deploy with no equivalent lever — a user who enters a key there has
+no way to `pip install` anything into the running container. Bundling the
+(small) package costs a little build size and nothing at runtime for anyone
+who never enters a key, since `build_sao_tracer()` still returns immediately
+without importing it whenever the key is blank.
 
 **Named limitation, not hidden**: `splunk_ao`'s context is a process-wide
 singleton, so if this app ever serves multiple concurrent Streamlit sessions
