@@ -20,12 +20,19 @@ on. Instead this file leans on each provider's own structured-output feature
 JSON without regex-scraping free text, and a parse failure is a loud
 `ModelError` naming the role that failed rather than a silent empty dict —
 silent failures are exactly what made the previous build hard to trust.
+
+Being the one seam every role's LLM call passes through also makes this the
+one place optional Splunk Agent Observability (SAO) tracing attaches
+(observability.py's SAOTracer, passed in as `tracer=`) — one named trace per
+role's real call, with zero changes to any role's own code. Mock/offline
+calls are never traced: there's no real model behavior to observe.
 """
 
 from __future__ import annotations
 
 import re
 import json
+import time
 
 DEFAULTS = {
     "anthropic": "claude-sonnet-4-6",
@@ -76,11 +83,13 @@ _TOOL_NAME = "emit_result"
 
 
 class Model:
-    def __init__(self, provider, api_key, model_name, budget):
+    def __init__(self, provider, api_key, model_name, budget, tracer=None):
         self.provider = provider          # "anthropic" | "openai" | "mock"
         self.model = model_name or DEFAULTS.get(provider, "")
         self.budget = budget
+        self.tracer = tracer              # optional observability.SAOTracer
         self._client = None
+        self._last_usage = (0, 0)         # (in_tok, out_tok) from the last live call
         if provider in ("anthropic", "openai") and api_key:
             self._init_client(api_key)
 
@@ -119,12 +128,18 @@ class Model:
 
     def _call(self, system, user, mock_fn, json_mode, role):
         if self.is_live:
+            start = time.time()
             try:
-                return self._ask_live(system, user, json_mode)
+                reply = self._ask_live(system, user, json_mode)
             except ModelError:
                 raise
             except Exception as e:
                 raise ModelError(f"{role}: {self.provider} call failed: {e}")
+            if self.tracer is not None:
+                in_tok, out_tok = self._last_usage
+                self.tracer.trace_call(role, system, user, self.model, reply,
+                                       in_tok, out_tok, (time.time() - start) * 1e9)
+            return reply
         # mock
         answer = mock_fn(system, user) if mock_fn else "{}"
         in_tok = max(1, len(system) + len(user)) // 4
@@ -157,6 +172,7 @@ class Model:
         resp = self._client.messages.create(**kwargs)
         self.budget.charge(resp.usage.input_tokens, resp.usage.output_tokens,
                            "anthropic", estimated=False)
+        self._last_usage = (resp.usage.input_tokens, resp.usage.output_tokens)
         if json_mode:
             for block in resp.content:
                 if block.type == "tool_use":
@@ -169,6 +185,7 @@ class Model:
         u = resp.usage
         self.budget.charge(u.prompt_tokens, u.completion_tokens,
                            "openai", estimated=False)
+        self._last_usage = (u.prompt_tokens, u.completion_tokens)
         return resp.choices[0].message.content or ""
 
     def _openai_create(self, system, user, json_mode):

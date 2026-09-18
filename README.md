@@ -90,6 +90,42 @@ present and every citation resolves against the real source. The model
 proposes; the gate decides. That split is what makes "the model does not get
 to call itself right" true rather than aspirational.
 
+## Observability (optional) — Splunk Agent Observability
+
+Every role's real LLM call already passes through one seam, `Model.ask_json()`
+(`foundry_mini/model.py`), so that's the one place optional tracing attaches
+(`foundry_mini/observability.py`) — zero changes to any role's own logic, same
+as every other design decision in this app.
+
+Two GUI fields, both optional ("Observability" expander in the sidebar): a
+**SAO API key** and a **SAO project name** (default `foundry-mini`, get-or-
+created by name — nothing to set up in the console first). Leave the key
+blank and `splunk_ao` is never imported and nothing is contacted — same
+fails-soft, opt-in posture as the provider keys, just for tracing instead of
+the scan itself. A bad key or the package not being installed degrades to "no
+tracing" with a message in the terminal, never a failed run. Offline demo
+mode never builds a tracer at all — there's no real model call to trace.
+
+One tracer is shared by both models in a run (the raw baseline and the
+harness pipeline), so a single "Run" click is **one SAO session** with **one
+named trace per role's call** (`baseline`, `cartographer`, `detector.rule_sweep`,
+`triager`, ...) inside it — not two disconnected sessions. A link back to the
+run's Agent Stream appears above the comparison table once tracing activates;
+a warning explains why not if a key was entered but it didn't.
+
+Not a hard dependency — `splunk-ao` isn't in `requirements.txt`, matching the
+same "own optional extra, not folded into the base install" reasoning used
+for Galileo in the sibling LangChain-based harness this pattern is ported
+from: `pip install splunk-ao` only if you intend to use this.
+
+**Named limitation, not hidden**: `splunk_ao`'s context is a process-wide
+singleton, so if this app ever serves multiple concurrent Streamlit sessions
+with *different* SAO accounts from one process, the last `init()` wins for
+all of them — fine for the single-user-at-a-time local/Streamlit-Cloud-demo
+scope this app targets, not fine the moment that stops being true (the exact
+same caveat this pattern's source repo already documents for its own
+FastAPI backend).
+
 ## Run locally
 
 ```bash

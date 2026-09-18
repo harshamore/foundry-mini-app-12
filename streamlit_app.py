@@ -18,6 +18,7 @@ from foundry_mini.baseline import run_baseline
 from foundry_mini.ciso_report import build_raw_ciso_report, build_harness_ciso_report
 from foundry_mini.rule_authoring import draft_rule_from_gap, push_rule
 from foundry_mini.remediator import suggest_patches
+from foundry_mini.observability import build_sao_tracer, DEFAULT_PROJECT as SAO_DEFAULT_PROJECT
 
 st.set_page_config(page_title="Foundry-mini — Agentic Security Scanner",
                    page_icon="🛡️", layout="wide")
@@ -129,6 +130,18 @@ with st.sidebar:
                                       "this cap (FR-112).")
 
     st.divider()
+    with st.expander("Observability — Splunk Agent Observability (optional)"):
+        st.caption("Both fields are optional. Leave the key blank and nothing "
+                   "SAO-related is imported or contacted — same fails-soft, "
+                   "opt-in behavior as the provider keys above, just for tracing "
+                   "instead of the scan itself. Never used in Offline demo mode.")
+        sao_api_key = st.text_input("SAO API key", type="password",
+                                    placeholder="leave blank to disable tracing")
+        sao_project = st.text_input("SAO project name", value=SAO_DEFAULT_PROJECT,
+                                    help="Get-or-created by name — no manual setup "
+                                         "needed in the SAO console first.")
+
+    st.divider()
     st.caption("Rules: CodeGuard (CC-BY-4.0). Spec: Cisco Foundry Security Spec. "
                "This is a prototype, not the production system.")
 
@@ -191,14 +204,14 @@ run = st.button("▶  Run: raw LLM vs. Foundry harness", type="primary",
                 disabled=sources is None)
 
 
-def _build_model():
+def _build_model(tracer=None):
     if provider in ("anthropic", "openai") and not api_key:
         st.error(f"Enter your {provider} API key in the sidebar, or switch to "
                  f"Offline demo mode.")
         st.stop()
     budget = Budget(budget_cap if budget_cap > 0 else None)
     try:
-        return Model(provider, api_key, model_name, budget), budget
+        return Model(provider, api_key, model_name, budget, tracer=tracer), budget
     except ModelError as e:
         st.error(str(e))
         st.stop()
@@ -293,17 +306,31 @@ def _record_history():
 
 if run and sources:
     for k in ("result", "result_md", "baseline", "drafted_rules", "patches",
-             "pushed_rules"):
+             "pushed_rules", "sao_urls", "sao_requested", "sao_activated"):
         st.session_state.pop(k, None)
 
+    # One tracer, shared by both models below, so a run is one SAO session
+    # with a named trace per role — not two disconnected sessions. Never
+    # built in offline mode: there's no real model call to trace, so
+    # attempting it would just be an unnecessary network round trip.
+    tracer = None
+    if provider != "mock" and sao_api_key:
+        st.session_state["sao_requested"] = True
+        tracer = build_sao_tracer(sao_api_key, sao_project)
+
     st.markdown("#### Running the raw LLM baseline")
-    model_a, _ = _build_model()
+    model_a, _ = _build_model(tracer)
     st.session_state["baseline"] = _run_raw(model_a)
 
     st.markdown("#### Running the Foundry pipeline")
-    model_b, budget_b = _build_model()
+    model_b, budget_b = _build_model(tracer)
     st.session_state["result"] = _run_pipeline(model_b, budget_b)
     st.session_state["result_md"] = build_markdown_report(st.session_state["result"])
+
+    if tracer is not None:
+        tracer.close()
+        st.session_state["sao_activated"] = tracer.activated
+        st.session_state["sao_urls"] = tracer.console_urls()
 
     _record_history()
 
@@ -494,6 +521,22 @@ def _render_patches(result):
             st.markdown(f"**Why this fixes it:** {pt['why']}")
 
 
+def _render_sao_status():
+    """Mirrors this app's own honesty pattern for Galileo tracing elsewhere in
+    this codebase: confirm activation with a real link, or say plainly why it
+    didn't, rather than leaving silence either way."""
+    if not st.session_state.get("sao_requested"):
+        return
+    project_url, agent_stream_url = st.session_state.get("sao_urls", (None, None))
+    if st.session_state.get("sao_activated") and agent_stream_url:
+        st.markdown(f"🔭 [View this run in Splunk Agent Observability →]({agent_stream_url})")
+    else:
+        st.warning("SAO tracing was requested but did not activate for this run. "
+                  "Check the terminal for a line starting with \"SAO tracing "
+                  "unavailable\" or \"SAO API key is set but the `splunk-ao` "
+                  "package isn't installed\" (pip install splunk-ao).")
+
+
 def _render_history():
     st.markdown("#### 🕘 Run history")
     st.caption("Last 2 runs")
@@ -527,6 +570,7 @@ def render_results_area():
     main_col, hist_col = st.columns([4, 1])
     with main_col:
         st.divider()
+        _render_sao_status()
         if baseline is not None and result is not None:
             _render_comparison_table(baseline, result)
         if baseline is not None:
