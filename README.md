@@ -97,12 +97,16 @@ Every role's real LLM call already passes through one seam, `Model.ask_json()`
 (`foundry_mini/observability.py`) — zero changes to any role's own logic, same
 as every other design decision in this app.
 
-Two GUI fields, both optional ("Observability" expander in the sidebar): a
-**SAO API key** and a **SAO project name** (default `foundry-mini`, get-or-
-created by name — nothing to set up in the console first). Leave the key
-blank and `splunk_ao` is never imported and nothing is contacted — same
-fails-soft, opt-in posture as the provider keys, just for tracing instead of
-the scan itself. A bad key or the package not being installed degrades to "no
+Three GUI fields, all optional ("Observability" expander in the sidebar): a
+**SAO API key**, a **SAO project name** (default `foundry-mini`), and a
+**SAO Agent Stream name** (default `streamlit`) — both get-or-created by
+name, nothing to set up in the console first. Both are exposed, not just
+project, because Splunk's own sample scripts always pass both explicitly to
+`splunk_ao_context.init()` as meaningful names (e.g. `project="Foundry"`,
+`agent_stream="foundry-trace"`), not just the project. Leave the key blank
+and `splunk_ao` is never imported and nothing is contacted — same fails-soft,
+opt-in posture as the provider keys, just for tracing instead of the scan
+itself. A bad key or the package not being installed degrades to "no
 tracing" with a message in the terminal, never a failed run. Offline demo
 mode never builds a tracer at all — there's no real model call to trace.
 

@@ -16,6 +16,12 @@ covers OpenAI (no Anthropic equivalent), and its auto-created traces have no
 shown way to name themselves per role — so both providers here go through
 one uniform `add_llm_span()` call instead, keeping every trace named after
 the role that produced it regardless of provider.
+
+project and agent_stream are both exposed as GUI fields (both optional,
+both blank-default) rather than just project — Splunk's own sample scripts
+always pass both explicitly to splunk_ao_context.init() as meaningful,
+memorable names (e.g. project="Foundry", agent_stream="foundry-trace"), not
+just the project.
 """
 
 from __future__ import annotations
@@ -85,7 +91,8 @@ class SAOTracer:
             pass
 
 
-def build_sao_tracer(api_key: str | None, project: str | None) -> SAOTracer | None:
+def build_sao_tracer(api_key: str | None, project: str | None,
+                     agent_stream: str | None = None) -> SAOTracer | None:
     """A ready-to-use SAOTracer, or None if tracing isn't configured/reachable.
 
     Known, named limitation (same one already accepted for Galileo in the
@@ -112,7 +119,7 @@ def build_sao_tracer(api_key: str | None, project: str | None) -> SAOTracer | No
 
     try:
         splunk_ao_context.init(project=project or DEFAULT_PROJECT,
-                               agent_stream=DEFAULT_AGENT_STREAM)
+                               agent_stream=agent_stream or DEFAULT_AGENT_STREAM)
         logger = splunk_ao_context.get_logger_instance()
         console_url = SplunkAOConfig.get().console_url or DEFAULT_CONSOLE_URL
         tracer = SAOTracer(logger, console_url)

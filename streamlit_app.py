@@ -18,7 +18,9 @@ from foundry_mini.baseline import run_baseline
 from foundry_mini.ciso_report import build_raw_ciso_report, build_harness_ciso_report
 from foundry_mini.rule_authoring import draft_rule_from_gap, push_rule
 from foundry_mini.remediator import suggest_patches
-from foundry_mini.observability import build_sao_tracer, DEFAULT_PROJECT as SAO_DEFAULT_PROJECT
+from foundry_mini.observability import (build_sao_tracer,
+                                        DEFAULT_PROJECT as SAO_DEFAULT_PROJECT,
+                                        DEFAULT_AGENT_STREAM as SAO_DEFAULT_AGENT_STREAM)
 
 st.set_page_config(page_title="Foundry-mini — Agentic Security Scanner",
                    page_icon="🛡️", layout="wide")
@@ -140,6 +142,12 @@ with st.sidebar:
         sao_project = st.text_input("SAO project name", value=SAO_DEFAULT_PROJECT,
                                     help="Get-or-created by name — no manual setup "
                                          "needed in the SAO console first.")
+        sao_agent_stream = st.text_input(
+            "SAO Agent Stream name", value=SAO_DEFAULT_AGENT_STREAM,
+            help="Also get-or-created by name. Splunk's own sample scripts set "
+                 "this explicitly alongside the project (e.g. a meaningful name "
+                 "like \"foundry-trace\"), so it's editable here too rather than "
+                 "silently fixed.")
 
     st.divider()
     st.caption("Rules: CodeGuard (CC-BY-4.0). Spec: Cisco Foundry Security Spec. "
@@ -316,7 +324,7 @@ if run and sources:
     tracer = None
     if provider != "mock" and sao_api_key:
         st.session_state["sao_requested"] = True
-        tracer = build_sao_tracer(sao_api_key, sao_project)
+        tracer = build_sao_tracer(sao_api_key, sao_project, sao_agent_stream)
 
     st.markdown("#### Running the raw LLM baseline")
     model_a, _ = _build_model(tracer)
