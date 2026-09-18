@@ -314,7 +314,8 @@ def _record_history():
 
 if run and sources:
     for k in ("result", "result_md", "baseline", "drafted_rules", "patches",
-             "pushed_rules", "sao_urls", "sao_requested", "sao_activated"):
+             "pushed_rules", "sao_urls", "sao_requested", "sao_activated",
+             "sao_warnings"):
         st.session_state.pop(k, None)
 
     # One tracer, shared by both models below, so a run is one SAO session
@@ -339,6 +340,7 @@ if run and sources:
         tracer.close()
         st.session_state["sao_activated"] = tracer.activated
         st.session_state["sao_urls"] = tracer.console_urls()
+        st.session_state["sao_warnings"] = tracer.sdk_warnings
 
     _record_history()
 
@@ -532,10 +534,21 @@ def _render_patches(result):
 def _render_sao_status():
     """Mirrors this app's own honesty pattern for Galileo tracing elsewhere in
     this codebase: confirm activation with a real link, or say plainly why it
-    didn't, rather than leaving silence either way."""
+    didn't, rather than leaving silence either way.
+
+    sao_warnings matters even when sao_activated is True: the SDK's own
+    start_trace()/add_llm_span()/conclude()/flush() calls catch their own
+    failures internally and log a warning instead of raising (confirmed by
+    reading the SDK source, not assumed) — so "no exception reached our
+    code" does not mean "the trace actually reached SAO." A populated
+    Agent Stream with empty traces is exactly this: the stream is
+    created by a call that DOES raise on failure, while the traces inside
+    it failed via the swallow-and-warn path instead."""
     if not st.session_state.get("sao_requested"):
         return
     project_url, agent_stream_url = st.session_state.get("sao_urls", (None, None))
+    warnings = st.session_state.get("sao_warnings") or []
+
     if st.session_state.get("sao_activated") and agent_stream_url:
         st.markdown(f"🔭 [View this run in Splunk Agent Observability →]({agent_stream_url})")
     else:
@@ -543,6 +556,15 @@ def _render_sao_status():
                   "Check the terminal for a line starting with \"SAO tracing "
                   "unavailable\" or \"SAO API key is set but the `splunk-ao` "
                   "package isn't installed\" (pip install splunk-ao).")
+
+    if warnings:
+        st.warning(f"SAO's own SDK logged {len(warnings)} warning(s) instead of "
+                  f"raising while sending this run's traces — this is the "
+                  f"likely reason an Agent Stream can show up in the console "
+                  f"with no traces inside it. Details below.")
+        with st.expander("SAO SDK warnings for this run"):
+            for w in warnings:
+                st.code(w, language=None)
 
 
 def _render_history():

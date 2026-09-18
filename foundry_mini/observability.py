@@ -22,12 +22,40 @@ both blank-default) rather than just project — Splunk's own sample scripts
 always pass both explicitly to splunk_ao_context.init() as meaningful,
 memorable names (e.g. project="Foundry", agent_stream="foundry-trace"), not
 just the project.
+
+Important, learned by reading the SDK's own source rather than assumed:
+start_trace() / add_llm_span() / conclude() / flush() do NOT raise on
+failure. They're wrapped in the SDK's own `warn_catch_exception` decorator,
+which catches the error and routes it to Python's `logging` module
+(`logging.getLogger("splunk_ao.logger").warning(...)`) instead of
+propagating it — by design, so one bad span never crashes the caller's
+app. That means try/except around these specific calls (kept below anyway,
+as a second line of defense for anything that DOES still raise) cannot see
+most real failures — this is why a project/Agent Stream can exist (that
+call path raises normally, so build_sao_tracer's try/except catches it)
+while individual traces silently never arrive. _WarningCollector attaches
+a handler to the "splunk_ao" logger to surface exactly these otherwise-
+invisible warnings in the app itself.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
+
+
+class _WarningCollector(logging.Handler):
+    """Captures splunk_ao's own internally-swallowed warnings (see module
+    docstring) so the app can show them instead of them vanishing into
+    Python logging with no visible handler configured."""
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self.records: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(self.format(record))
 
 DEFAULT_PROJECT = "foundry-mini"
 DEFAULT_AGENT_STREAM = "streamlit"
@@ -45,6 +73,15 @@ class SAOTracer:
         self._console_url = console_url
         self._session_started = False
         self.activated = False   # flips true on the first successful span
+        self._warnings = _WarningCollector()
+        logging.getLogger("splunk_ao").addHandler(self._warnings)
+
+    @property
+    def sdk_warnings(self) -> list[str]:
+        """Warnings the SDK logged internally instead of raising (see module
+        docstring) — non-empty here is the real signal something didn't
+        actually reach SAO, even when activated is True."""
+        return self._warnings.records
 
     def start_session(self) -> None:
         if self._session_started:
@@ -86,9 +123,16 @@ class SAOTracer:
 
     def close(self) -> None:
         try:
-            self._logger.flush()
+            self._logger.flush()   # on_error deliberately omitted -- letting
+                                   # a flush failure fall through to its
+                                   # default logging.warning() path, same
+                                   # channel _WarningCollector already
+                                   # watches, keeps one uniform mechanism
+                                   # for every SDK-swallowed failure.
         except Exception:
             pass
+        finally:
+            logging.getLogger("splunk_ao").removeHandler(self._warnings)
 
 
 def build_sao_tracer(api_key: str | None, project: str | None,

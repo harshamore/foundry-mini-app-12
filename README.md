@@ -117,6 +117,23 @@ named trace per role's call** (`baseline`, `cartographer`, `detector.rule_sweep`
 run's Agent Stream appears above the comparison table once tracing activates;
 a warning explains why not if a key was entered but it didn't.
 
+**A populated Agent Stream with no traces inside it is a real failure mode,
+not a fluke** — learned by reading the `splunk-ao` SDK's own source, not
+assumed. `splunk_ao_context.init()`/`get_logger_instance()` (which creates
+the project/Agent Stream) raises normally on failure, so `build_sao_tracer()`
+catches it the ordinary way. But `start_trace()`, `add_llm_span()`,
+`conclude()`, and `flush()` are wrapped in the SDK's own `warn_catch_exception`
+decorator, which catches failures internally and routes them to Python's
+`logging` module (`logging.getLogger("splunk_ao.logger").warning(...)`)
+instead of raising — by design, so one bad span never crashes the caller's
+app. That means an Agent Stream can exist while every individual trace
+silently failed to send, with nothing raised for `try`/`except` to catch on
+our side. `observability.py`'s `_WarningCollector` attaches a handler to the
+`"splunk_ao"` logger for the duration of a run specifically to surface these
+otherwise-invisible warnings — they show up as a warning + expandable detail
+above the comparison table whenever the SDK logs one, whether or not
+`activated` ended up `True`.
+
 `splunk-ao` **is** listed in `requirements.txt`, unlike Galileo's own
 `[observability]` extra in the sibling harness this pattern is ported from —
 deliberately different, not an oversight. That repo can install its
