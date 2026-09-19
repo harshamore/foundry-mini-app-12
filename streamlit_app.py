@@ -320,12 +320,14 @@ def _refresh_sao_status(tracer):
     st.session_state["sao_activated"] = tracer.activated
     st.session_state["sao_urls"] = tracer.console_urls()
     st.session_state["sao_warnings"] = tracer.sdk_warnings
+    st.session_state["sao_session_id"] = tracer.session_id
+    st.session_state["sao_pending_before_flush"] = tracer.pending_before_flush
 
 
 if run and sources:
     for k in ("result", "result_md", "baseline", "drafted_rules", "patches",
              "pushed_rules", "sao_urls", "sao_requested", "sao_activated",
-             "sao_warnings"):
+             "sao_warnings", "sao_session_id", "sao_pending_before_flush"):
         st.session_state.pop(k, None)
 
     # A brand-new "Run" click always starts a brand-new SAO session — detach
@@ -592,6 +594,30 @@ def _render_sao_status():
         with st.expander("SAO SDK warnings for this run"):
             for w in warnings:
                 st.code(w, language=None)
+
+    session_id = st.session_state.get("sao_session_id")
+    pending = st.session_state.get("sao_pending_before_flush")
+    if session_id is not None:
+        with st.expander("SAO diagnostic detail"):
+            st.markdown(f"**Session id:** `{session_id}` — look for this exact "
+                       f"session in the console, then open it to see its "
+                       f"traces nested inside (a session *list* view won't "
+                       f"show them).")
+            if pending is not None:
+                if pending > 0:
+                    st.markdown(f"**{pending} trace(s) were built locally** "
+                               f"before the last flush — so `start_trace`/"
+                               f"`add_llm_span`/`conclude` did their job. If "
+                               f"nothing still shows up in the console with no "
+                               f"warnings above either, the failure is in "
+                               f"delivery (flush/network) below what the SDK's "
+                               f"own logging surfaces.")
+                else:
+                    st.markdown("**0 traces were built locally** before the "
+                               "last flush — the problem is upstream of "
+                               "sending: `start_trace`/`add_llm_span`/"
+                               "`conclude` never produced a trace object in "
+                               "the first place.")
 
 
 def _render_history():

@@ -77,8 +77,13 @@ class SAOTracer:
         self._console_url = console_url
         self._session_started = False
         self.activated = False   # flips true on the first successful span
+        self.pending_before_flush = 0   # trace count seen just before the last flush()
         self._warnings = _WarningCollector()
         logging.getLogger("splunk_ao").addHandler(self._warnings)
+
+    @property
+    def session_id(self) -> str | None:
+        return getattr(self._logger, "session_id", None)
 
     @property
     def sdk_warnings(self) -> list[str]:
@@ -129,7 +134,15 @@ class SAOTracer:
         """Push whatever's been logged so far. Safe to call repeatedly — once
         after the main run, again after each later follow-on action — unlike
         the old close(), this does NOT tear down the warning handler, since
-        this same tracer is reused for those later calls too."""
+        this same tracer is reused for those later calls too.
+
+        Records pending_before_flush = how many trace objects the logger
+        actually held locally right before this call — the one number that
+        tells apart "nothing was ever built" (0: the problem is in
+        start_trace/add_llm_span/conclude) from "something was built but
+        never sent" (>0: the problem is in flush()/delivery, i.e. network,
+        auth scope on ingestion, or a server-side rejection)."""
+        self.pending_before_flush = len(getattr(self._logger, "traces", None) or [])
         try:
             self._logger.flush()   # on_error deliberately omitted -- letting
                                    # a flush failure fall through to its
