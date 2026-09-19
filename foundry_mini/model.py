@@ -137,8 +137,13 @@ class Model:
                 raise ModelError(f"{role}: {self.provider} call failed: {e}")
             if self.tracer is not None:
                 in_tok, out_tok = self._last_usage
+                # int(), not float: the SDK's add_llm_span() types duration_ns
+                # as int | None -- a float here risks a pydantic validation
+                # error inside a call the SDK itself only catches broadly
+                # enough to log, not always cleanly.
+                duration_ns = int((time.time() - start) * 1e9)
                 self.tracer.trace_call(role, system, user, self.model, reply,
-                                       in_tok, out_tok, (time.time() - start) * 1e9)
+                                       in_tok, out_tok, duration_ns)
             return reply
         # mock
         answer = mock_fn(system, user) if mock_fn else "{}"

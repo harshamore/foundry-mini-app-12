@@ -581,10 +581,19 @@ def _render_sao_status():
     if st.session_state.get("sao_activated") and agent_stream_url:
         st.markdown(f"🔭 [View this run in Splunk Agent Observability →]({agent_stream_url})")
     else:
-        st.warning("SAO tracing was requested but did not activate for this run. "
-                  "Check the terminal for a line starting with \"SAO tracing "
-                  "unavailable\" or \"SAO API key is set but the `splunk-ao` "
-                  "package isn't installed\" (pip install splunk-ao).")
+        st.warning("SAO tracing was requested but did not activate for this run "
+                  "— meaning every individual trace attempt failed, even if a "
+                  "session/Agent Stream still shows up in the console (session "
+                  "creation is a separate call). Check the terminal (or your "
+                  "host's log viewer, e.g. Streamlit Community Cloud's "
+                  "\"Manage app\" logs, if not running locally) for one of:\n"
+                  "- `SAO tracing unavailable (...)` — the tracer itself never "
+                  "built (bad key, unreachable console, `splunk-ao` not "
+                  "installed).\n"
+                  "- `SAO trace_call('<role>') failed (...)` — the tracer built "
+                  "fine, but this specific role's trace raised. The exception "
+                  "type/message right after it is the actual cause.\n\n"
+                  "Paste whichever one you see back for a targeted fix.")
 
     if warnings:
         st.warning(f"SAO's own SDK logged {len(warnings)} warning(s) instead of "

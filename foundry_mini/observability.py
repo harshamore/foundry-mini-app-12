@@ -99,7 +99,7 @@ class SAOTracer:
         self._session_started = True
 
     def trace_call(self, role: str, system: str, user: str, model_name: str,
-                   reply: str, in_tok: int, out_tok: int, duration_ns: float) -> None:
+                   reply: str, in_tok: int, out_tok: int, duration_ns: int) -> None:
         """One trace + one LLM span for a single Model._call(). Never raises —
         a bad SAO account degrades to 'no tracing', not a failed scan."""
         try:
